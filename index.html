@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Palette generator</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='7' y='7' width='18' height='18' transform='rotate(45 16 16)' fill='%233f6fa8' stroke='%23e7eaf0' stroke-width='1.5'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&family=IBM+Plex+Mono:wght@400;500&family=Playfair+Display:wght@400..900&display=swap" rel="stylesheet">
+<style>
+  :root{
+    box-sizing:border-box;
+    padding-top:env(safe-area-inset-top,0px);
+    padding-bottom:env(safe-area-inset-bottom,0px);
+    color-scheme:dark;
+    --bg:#0d0f14; --panel:#14171f; --panel-edge:#232732;
+    --blue:#3f6fa8; --blue2:#5c7f9e; --steel:#7c8698;
+    --ink:#e7eaf0; --ink-soft:#727c8c; --line:#252a35;
+    --ok:#7fa88a; --danger:#c77a7a;
+    --font-ui:'Space Grotesk', system-ui, sans-serif;
+    --font-display:'Playfair Display', Georgia, serif;
+    --font-mono:'IBM Plex Mono', ui-monospace, Menlo, monospace;
+  }
+  html{ scroll-padding-top:env(safe-area-inset-top,0px); height:100%; }
+  *{ box-sizing:border-box; }
+  body{
+    margin:0; min-height:100%; background:var(--bg); color:var(--ink);
+    font-family:var(--font-ui); display:flex; flex-direction:column;
+  }
+  header{
+    padding:22px 30px; border-bottom:4px double var(--blue2);
+    display:flex; align-items:baseline; gap:16px; flex-wrap:wrap;
+  }
+  header h1{
+    margin:0; font-family:var(--font-display); font-weight:800;
+    font-size:1.5rem; letter-spacing:.02em;
+  }
+  header p{ margin:0; font-size:.78rem; color:var(--ink-soft); }
+  .app{ display:flex; flex:1; flex-wrap:wrap; }
+
+  /* Stage */
+  .stage{
+    flex:3 1 520px; min-width:0; padding:40px; display:flex; align-items:stretch;
+    border-right:1px solid var(--line);
+  }
+  .rail-frame{ position:relative; flex:1; display:flex; min-height:480px; min-width:0; }
+  .rail-frame::before, .rail-frame::after{ content:''; position:absolute; pointer-events:none; z-index:2; }
+  .rail-frame::before{ inset:8px; border:1px solid rgba(231,234,240,.6); }
+  .rail-frame::after{ inset:13px; border:1px solid rgba(92,127,158,.35); }
+  .rail-d{
+    position:absolute; width:10px; height:10px; z-index:3;
+    background:var(--blue); border:2px solid var(--bg);
+    transform:translate(-50%,-50%) rotate(45deg);
+    box-shadow:0 0 0 1px rgba(231,234,240,.5);
+  }
+  .rail-d.tl{top:8px; left:8px;} .rail-d.tr{top:8px; left:calc(100% - 8px);}
+  .rail-d.bl{top:calc(100% - 8px); left:8px;} .rail-d.br{top:calc(100% - 8px); left:calc(100% - 8px);}
+
+  .preview{
+    flex:1; margin:34px; display:flex; flex-direction:column; gap:16px;
+    min-width:0; position:relative; z-index:4;
+  }
+  .meta{ display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap;
+    font-size:.72rem; letter-spacing:.06em; font-variant-numeric:tabular-nums; }
+  .meta .dims{ color:var(--blue2); }
+  .meta .tip{ color:var(--ink-soft); }
+  kbd{ font-family:var(--font-mono); font-size:.68rem; border:1px solid var(--line); padding:1px 5px; color:var(--ink); }
+
+  /* Swatches */
+  .swatches{ display:flex; gap:8px; flex:1; min-height:340px; min-width:0; }
+  .sw{
+    flex:1 1 0; min-width:0; display:flex; flex-direction:column;
+    background:var(--panel); border:1px solid var(--line);
+    box-shadow:inset 0 0 0 3px var(--panel), inset 0 0 0 4px var(--panel-edge);
+  }
+  .chip{ flex:1; min-height:150px; margin:6px 6px 0; position:relative; }
+  .sw.locked{ border-color:var(--blue2); }
+  .sw.locked .chip::after{
+    content:''; position:absolute; top:10px; right:10px; width:9px; height:9px;
+    background:var(--blue); border:2px solid var(--bg); transform:rotate(45deg);
+    box-shadow:0 0 0 1px rgba(231,234,240,.6);
+  }
+  .sw.fresh .chip{ animation:reveal .45s ease-out; }
+  @keyframes reveal{ from{ opacity:.25; } to{ opacity:1; } }
+  @media (prefers-reduced-motion:reduce){ .sw.fresh .chip{ animation:none; } }
+
+  .plate{ padding:12px 10px 10px; display:flex; flex-direction:column; gap:3px; min-width:0; }
+  .code{
+    background:none; border:0; padding:2px 0; margin:0; text-align:left; cursor:pointer;
+    font-family:var(--font-mono); color:var(--ink); min-width:0;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .code.hex{ font-size:.95rem; font-weight:500; letter-spacing:.02em; }
+  .code.rgb{ font-size:.68rem; color:var(--ink-soft); }
+  .code:hover{ color:#fff; }
+  .code:focus-visible{ outline:1px solid #fff; outline-offset:2px; }
+  .code.done{ color:var(--ok); }
+
+  .acts{ display:grid; grid-template-columns:repeat(3,1fr); gap:4px; margin-top:9px; }
+  .ic{
+    height:30px; min-width:0; display:grid; place-items:center; cursor:pointer;
+    background:transparent; border:1px solid var(--line); color:var(--ink-soft); padding:0;
+  }
+  .ic svg{ width:15px; height:15px; fill:none; stroke:currentColor; stroke-width:1.4; stroke-linecap:square; }
+  .ic:hover{ color:var(--ink); border-color:var(--blue2); }
+  .ic:focus-visible{ outline:1px solid #fff; outline-offset:2px; }
+  .ic.on{ color:#fff; border-color:var(--blue); background:rgba(63,111,168,.22); }
+  .ic.done{ color:var(--ok); border-color:var(--ok); }
+  .ic:disabled{ opacity:.3; cursor:not-allowed; }
+  .ic:disabled:hover{ color:var(--ink-soft); border-color:var(--line); }
+
+  /* Side panel */
+  .side{
+    flex:1 1 300px; min-width:0; padding:30px 28px;
+    display:flex; flex-direction:column; gap:28px; overflow:auto;
+  }
+  .group-title{
+    display:flex; align-items:center; gap:10px;
+    text-transform:uppercase; letter-spacing:.26em; font-size:.66rem;
+    color:var(--ink-soft); margin-bottom:12px;
+  }
+  .group-title::before{ content:''; width:6px; height:6px; background:var(--blue); transform:rotate(45deg); flex:none; }
+  .group-title::after{ content:''; flex:1; height:3px; border-top:1px solid var(--blue); border-bottom:1px solid var(--blue2); }
+  .hint{ font-size:.72rem; color:var(--ink-soft); line-height:1.5; margin-top:10px; }
+
+  .select-wrap{ position:relative; }
+  .select-wrap::after{
+    content:''; position:absolute; right:16px; top:50%; width:7px; height:7px; pointer-events:none;
+    border-right:1px solid var(--blue2); border-bottom:1px solid var(--blue2);
+    transform:translateY(-70%) rotate(45deg);
+  }
+  select{
+    width:100%; -webkit-appearance:none; appearance:none; border-radius:0; cursor:pointer;
+    background:var(--panel); color:var(--ink); border:1px solid var(--line);
+    box-shadow:inset 0 0 0 3px var(--panel), inset 0 0 0 4px var(--panel-edge);
+    font-family:var(--font-ui); font-size:.85rem; letter-spacing:.03em;
+    padding:13px 40px 13px 14px;
+  }
+  select:hover{ border-color:var(--blue2); }
+  select:focus-visible{ outline:1px solid #fff; outline-offset:2px; }
+  option{ background:var(--panel); color:var(--ink); }
+
+  .count-row{ display:grid; grid-template-columns:1fr auto 1fr; gap:8px; align-items:stretch; }
+  .count{
+    min-width:64px; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    border:1px solid var(--line); padding:4px 10px;
+  }
+  .count b{ font-family:var(--font-display); font-weight:700; font-size:1.35rem; line-height:1; font-variant-numeric:tabular-nums; }
+  .count span{ font-size:.62rem; color:var(--ink-soft); margin-top:3px; }
+
+  button.tool{
+    --c:var(--blue2);
+    border:1px solid var(--line); background:
+      linear-gradient(var(--c),var(--c)) top left/8px 1px no-repeat,
+      linear-gradient(var(--c),var(--c)) top left/1px 8px no-repeat,
+      linear-gradient(var(--c),var(--c)) top right/8px 1px no-repeat,
+      linear-gradient(var(--c),var(--c)) top right/1px 8px no-repeat,
+      linear-gradient(var(--c),var(--c)) bottom left/8px 1px no-repeat,
+      linear-gradient(var(--c),var(--c)) bottom left/1px 8px no-repeat,
+      linear-gradient(var(--c),var(--c)) bottom right/8px 1px no-repeat,
+      linear-gradient(var(--c),var(--c)) bottom right/1px 8px no-repeat,
+      var(--panel);
+    box-shadow:inset 0 0 0 3px var(--panel), inset 0 0 0 4px var(--panel-edge);
+    color:var(--ink); font-family:var(--font-ui); font-size:.78rem;
+    letter-spacing:.06em; padding:13px 8px; cursor:pointer;
+  }
+  button.tool:hover{ --c:#fff; }
+  button.tool:focus-visible{ outline:1px solid #fff; outline-offset:2px; }
+  button.tool:disabled{ opacity:.35; cursor:not-allowed; --c:var(--line); }
+
+  button.generate{
+    width:100%; background:var(--blue); border:1px solid var(--blue2); color:#fff;
+    font-family:var(--font-ui); font-size:.8rem; font-weight:500; text-transform:uppercase; letter-spacing:.24em;
+    padding:24px 10px; cursor:pointer;
+    box-shadow:inset 0 0 0 4px var(--blue), inset 0 0 0 5px rgba(231,234,240,.4);
+  }
+  button.generate:hover{ background:#4a7cb8; box-shadow:inset 0 0 0 4px #4a7cb8, inset 0 0 0 5px rgba(231,234,240,.55); }
+  button.generate:focus-visible{ outline:1px solid #fff; outline-offset:2px; }
+  button.plain{
+    width:100%; margin-top:8px; background:transparent; border:1px solid var(--line);
+    color:var(--ink-soft); font-family:var(--font-ui); font-size:.68rem; text-transform:uppercase;
+    letter-spacing:.2em; padding:11px 10px; cursor:pointer;
+  }
+  button.plain:hover{ color:var(--ink); border-color:var(--blue2); }
+  button.plain:focus-visible{ outline:1px solid #fff; outline-offset:2px; }
+  .status{ font-size:.72rem; color:var(--ink-soft); margin-top:8px; min-height:1.1em; }
+
+  @media (max-width:760px){
+    header{ padding:18px 20px; }
+    .stage{ border-right:none; border-bottom:1px solid var(--line); padding:18px; flex-basis:100%; }
+    .rail-frame{ min-height:0; }
+    .preview{ margin:30px 24px; }
+    .swatches{ flex-direction:column; min-height:0; }
+    .sw{ flex-direction:row; }
+    .chip{ min-height:84px; margin:6px 0 6px 6px; }
+    .plate{ flex:0 0 58%; justify-content:center; }
+    .side{ padding:24px 20px; flex-basis:100%; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Palette generator</h1>
+  <p>Lock the colors you like and generate around them.</p>
+</header>
+
+<div class="app">
+  <div class="stage">
+    <div class="rail-frame">
+      <div class="rail-d tl"></div><div class="rail-d tr"></div>
+      <div class="rail-d bl"></div><div class="rail-d br"></div>
+      <div class="preview">
+        <div class="meta">
+          <div class="dims" id="dims"></div>
+          <div class="tip">Press <kbd>Space</kbd> to generate</div>
+        </div>
+        <div class="swatches" id="swatches" aria-label="Palette colors"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="side">
+    <div>
+      <div class="group-title">Harmony</div>
+      <div class="select-wrap">
+        <select id="harmony" aria-label="Palette type">
+          <option value="monochromatic">Monochromatic</option>
+          <option value="analogous" selected>Analogous</option>
+          <option value="complementary">Complementary</option>
+          <option value="split">Split complementary</option>
+          <option value="triadic">Triadic</option>
+          <option value="tetradic">Tetradic</option>
+        </select>
+      </div>
+      <div class="hint" id="harmonyHint"></div>
+    </div>
+
+    <div>
+      <div class="group-title">Colors</div>
+      <div class="count-row">
+        <button class="tool" id="btnRemove">Remove</button>
+        <div class="count" aria-live="polite"><b id="countVal">5</b><span>of 8</span></div>
+        <button class="tool" id="btnAdd">Add</button>
+      </div>
+      <div class="hint">Between 2 and 8 colors. Remove takes the last unlocked color.</div>
+    </div>
+
+    <div>
+      <div class="group-title">Generate</div>
+      <button class="generate" id="btnGen">Generate palette</button>
+      <button class="plain" id="btnCopyAll">Copy as CSS variables</button>
+      <button class="plain" id="btnUnlock">Unlock all</button>
+      <div class="status" id="status" aria-live="polite"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const $ = id => document.getElementById(id);
+  const MIN = 2, MAX = 8;
+
+  const HINTS = {
+    monochromatic:'One hue, stepped from dark to light.',
+    analogous:'Neighboring hues on the color wheel, spread evenly.',
+    complementary:'A hue and its opposite, 180° apart, with light and dark variations.',
+    split:'A hue plus the two hues beside its opposite, at 150° and 210°.',
+    triadic:'Three hues spaced 120° apart.',
+    tetradic:'Two complementary pairs forming a rectangle: 0°, 60°, 180°, 240°.'
+  };
+
+  const ICONS = {
+    lock:'<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="7" width="10" height="7"/><path d="M5 7V5a3 3 0 0 1 6 0v2"/></svg>',
+    unlock:'<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="7" width="10" height="7"/><path d="M5 7V5a3 3 0 0 1 5.8-1.1"/></svg>',
+    copy:'<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5" y="5" width="8" height="9"/><path d="M3 11V2h7"/></svg>',
+    check:'<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3 3 7-7"/></svg>',
+    remove:'<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 3.5l9 9M12.5 3.5l-9 9"/></svg>'
+  };
+
+  /* ---------- color math ---------- */
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+  const wrap = h => ((h % 360) + 360) % 360;
+
+  function hslToRgb(h, s, l){
+    s /= 100; l /= 100;
+    const k = n => (n + h / 30) % 12;
+    const a = s * Math.min(l, 1 - l);
+    const f = n => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+    return [f(0), f(8), f(4)].map(v => Math.round(v * 255));
+  }
+  function rgbToHsl(r, g, b){
+    r /= 255; g /= 255; b /= 255;
+    const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+    let h = 0, s = 0; const l = (max + min) / 2;
+    if(d){
+      s = d / (1 - Math.abs(2 * l - 1));
+      if(max === r) h = 60 * (((g - b) / d) % 6);
+      else if(max === g) h = 60 * ((b - r) / d + 2);
+      else h = 60 * ((r - g) / d + 4);
+    }
+    return { h:wrap(h), s:s * 100, l:l * 100 };
+  }
+  const toHex = rgb => '#' + rgb.map(v => v.toString(16).padStart(2, '0')).join('').toUpperCase();
+
+  function makeColor(h, s, l){
+    const rgb = hslToRgb(wrap(h), clamp(s, 12, 95), clamp(l, 10, 92));
+    return { rgb, hex:toHex(rgb), locked:false };
+  }
+
+  /* ---------- harmony plans: per-index offsets from a base color ---------- */
+  function cycle(offsets){
+    const shifts = [0, 20, -20, 32, -32];
+    return n => Array.from({length:n}, (_, i) => {
+      const round = Math.floor(i / offsets.length);
+      return { dh:offsets[i % offsets.length], dl:shifts[round % shifts.length], ds:round ? -10 : 0 };
+    });
+  }
+  const PLANS = {
+    monochromatic: n => Array.from({length:n}, (_, i) => ({
+      dh:0, dl:n > 1 ? -34 + 68 * i / (n - 1) : 0, ds:i % 2 ? -8 : 0
+    })),
+    analogous: n => {
+      const span = Math.min(24 * (n - 1), 160);
+      return Array.from({length:n}, (_, i) => ({
+        dh:n > 1 ? -span / 2 + span * i / (n - 1) : 0, dl:[0, 7, -7][i % 3], ds:0
+      }));
+    },
+    complementary: cycle([0, 180]),
+    split: cycle([0, 150, 210]),
+    triadic: cycle([0, 120, 240]),
+    tetradic: cycle([0, 60, 180, 240])
+  };
+
+  const state = { type:'analogous', colors:[], base:null, fresh:new Set() };
+
+  function randomBase(){
+    return { h:Math.random() * 360, s:48 + Math.random() * 32, l:44 + Math.random() * 12 };
+  }
+
+  /* Base is derived from the first locked color so the harmony forms around it */
+  function computeBase(plan){
+    const k = state.colors.findIndex(c => c.locked);
+    if(k < 0 || !plan[k]) return randomBase();
+    const hsl = rgbToHsl(...state.colors[k].rgb);
+    return { h:hsl.h - plan[k].dh, s:hsl.s - plan[k].ds, l:hsl.l - plan[k].dl };
+  }
+
+  function fromPlan(p, base){ return makeColor(base.h + p.dh, base.s + p.ds, base.l + p.dl); }
+
+  function generate(){
+    const n = state.colors.length;
+    const plan = PLANS[state.type](n);
+    const base = computeBase(plan);
+    state.base = base;
+    state.fresh = new Set();
+    state.colors = state.colors.map((c, i) => {
+      if(c.locked) return c;
+      state.fresh.add(i);
+      return fromPlan(plan[i], base);
+    });
+    render();
+  }
+
+  /* ---------- clipboard ---------- */
+  async function copyText(text){
+    try { await navigator.clipboard.writeText(text); return true; }
+    catch(e){
+      const ta = document.createElement('textarea');
+      ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      let ok = false; try { ok = document.execCommand('copy'); } catch(_){}
+      ta.remove(); return ok;
+    }
+  }
+  function flash(el, ok, restore){
+    el.classList.toggle('done', ok);
+    setTimeout(() => { el.classList.remove('done'); restore && restore(); }, 1300);
+  }
+  const say = msg => { $('status').textContent = msg; };
+
+  /* ---------- render ---------- */
+  function render(){
+    const wrapEl = $('swatches');
+    wrapEl.innerHTML = '';
+    const n = state.colors.length;
+    const lockedCount = state.colors.filter(c => c.locked).length;
+
+    state.colors.forEach((c, i) => {
+      const rgbText = 'rgb(' + c.rgb.join(', ') + ')';
+      const sw = document.createElement('div');
+      sw.className = 'sw' + (c.locked ? ' locked' : '') + (state.fresh.has(i) ? ' fresh' : '');
+      sw.innerHTML =
+        '<div class="chip" style="background:' + c.hex + '"></div>' +
+        '<div class="plate">' +
+          '<button class="code hex" title="Copy HEX">' + c.hex + '</button>' +
+          '<button class="code rgb" title="Copy RGB">' + rgbText + '</button>' +
+          '<div class="acts">' +
+            '<button class="ic lock' + (c.locked ? ' on' : '') + '" aria-pressed="' + c.locked + '" aria-label="' + (c.locked ? 'Unlock ' : 'Lock ') + c.hex + '" title="' + (c.locked ? 'Unlock' : 'Lock') + '">' + (c.locked ? ICONS.lock : ICONS.unlock) + '</button>' +
+            '<button class="ic copy" aria-label="Copy ' + c.hex + '" title="Copy HEX">' + ICONS.copy + '</button>' +
+            '<button class="ic del" aria-label="Remove ' + c.hex + '" title="Remove"' + (n <= MIN ? ' disabled' : '') + '>' + ICONS.remove + '</button>' +
+          '</div>' +
+        '</div>';
+
+      const [hexBtn, rgbBtn] = sw.querySelectorAll('.code');
+      hexBtn.addEventListener('click', async () => { const ok = await copyText(c.hex); flash(hexBtn, ok); say(ok ? 'Copied ' + c.hex : 'Copy failed.'); });
+      rgbBtn.addEventListener('click', async () => { const ok = await copyText(rgbText); flash(rgbBtn, ok); say(ok ? 'Copied ' + rgbText : 'Copy failed.'); });
+
+      sw.querySelector('.lock').addEventListener('click', () => {
+        c.locked = !c.locked; state.fresh = new Set(); render();
+        const btn = $('swatches').children[i].querySelector('.lock'); btn && btn.focus();
+      });
+      const copyBtn = sw.querySelector('.copy');
+      copyBtn.addEventListener('click', async () => {
+        const ok = await copyText(c.hex);
+        copyBtn.innerHTML = ok ? ICONS.check : ICONS.copy;
+        flash(copyBtn, ok, () => { copyBtn.innerHTML = ICONS.copy; });
+        say(ok ? 'Copied ' + c.hex : 'Copy failed.');
+      });
+      sw.querySelector('.del').addEventListener('click', () => {
+        if(state.colors.length <= MIN) return;
+        state.colors.splice(i, 1); state.fresh = new Set(); render();
+        say('Removed ' + c.hex);
+      });
+      wrapEl.appendChild(sw);
+    });
+
+    const typeName = $('harmony').selectedOptions[0].textContent.toLowerCase();
+    $('dims').textContent = n + ' colors, ' + typeName + (lockedCount ? ', ' + lockedCount + ' locked' : '');
+    $('countVal').textContent = n;
+    $('btnAdd').disabled = n >= MAX;
+    $('btnRemove').disabled = n <= MIN;
+    $('btnUnlock').disabled = !lockedCount;
+    $('harmonyHint').textContent = HINTS[state.type];
+  }
+
+  /* ---------- controls ---------- */
+  $('harmony').addEventListener('change', e => { state.type = e.target.value; generate(); });
+  $('btnGen').addEventListener('click', () => { say(''); generate(); });
+
+  $('btnAdd').addEventListener('click', () => {
+    const n = state.colors.length; if(n >= MAX) return;
+    const plan = PLANS[state.type](n + 1);
+    const base = state.base || computeBase(plan);
+    state.colors.push(fromPlan(plan[n], base));
+    state.fresh = new Set([n]);
+    render(); say('Added ' + state.colors[n].hex);
+  });
+
+  $('btnRemove').addEventListener('click', () => {
+    const n = state.colors.length; if(n <= MIN) return;
+    let idx = -1;
+    for(let i = n - 1; i >= 0; i--){ if(!state.colors[i].locked){ idx = i; break; } }
+    if(idx < 0) idx = n - 1;
+    const [gone] = state.colors.splice(idx, 1);
+    state.fresh = new Set(); render(); say('Removed ' + gone.hex);
+  });
+
+  $('btnUnlock').addEventListener('click', () => {
+    state.colors.forEach(c => { c.locked = false; });
+    state.fresh = new Set(); render(); say('All colors unlocked.');
+  });
+
+  $('btnCopyAll').addEventListener('click', async () => {
+    const css = ':root{\n' + state.colors.map((c, i) => '  --color-' + (i + 1) + ': ' + c.hex + ';').join('\n') + '\n}';
+    const ok = await copyText(css);
+    say(ok ? 'Copied ' + state.colors.length + ' colors as CSS variables.' : 'Copy failed. Try again or copy each HEX.');
+  });
+
+  document.addEventListener('keydown', e => {
+    if(e.code !== 'Space' || e.repeat) return;
+    const tag = (e.target.tagName || '').toLowerCase();
+    if(['button','select','input','textarea','option'].includes(tag)) return;
+    e.preventDefault(); generate();
+  });
+
+  /* ---------- init ---------- */
+  state.colors = Array.from({length:5}, () => ({ rgb:[0,0,0], hex:'#000000', locked:false }));
+  generate();
+})();
+</script>
+</body>
+</html>
