@@ -248,6 +248,7 @@
     <div>
       <div class="group-title">Generate</div>
       <button class="generate" id="btnGen">Generate palette</button>
+      <button class="plain" id="btnPng">Download PNG</button>
       <button class="plain" id="btnCopyAll">Copy as CSS variables</button>
       <button class="plain" id="btnUnlock">Unlock all</button>
       <div class="status" id="status" aria-live="polite"></div>
@@ -308,19 +309,37 @@
   }
 
   /* ---------- harmony plans: per-index offsets from a base color ---------- */
+  const rand = (a, b) => a + Math.random() * (b - a);
+
+  /* A fresh variation is drawn on every generate, so a locked color never
+     locks the rest of the palette into one fixed result */
+  function newVariation(){
+    const flip = Math.random() < .5 ? 1 : -1;
+    return {
+      step:rand(14, 32),                      /* analogous hue step */
+      dir:Math.random() < .5 ? -1 : 1,        /* analogous direction */
+      lo:rand(-40, -22), hi:rand(22, 40),     /* monochromatic lightness range */
+      shifts:[0, flip * rand(14, 24), -flip * rand(14, 24), flip * rand(26, 36), -flip * rand(26, 36)]
+    };
+  }
+  function jitter(){
+    return state.type === 'monochromatic'
+      ? { dh:rand(-3, 3), ds:rand(-14, 10), dl:rand(-4, 4) }
+      : { dh:rand(-7, 7), ds:rand(-18, 12), dl:rand(-10, 10) };
+  }
+
   function cycle(offsets){
-    const shifts = [0, 20, -20, 32, -32];
-    return n => Array.from({length:n}, (_, i) => {
+    return (n, v) => Array.from({length:n}, (_, i) => {
       const round = Math.floor(i / offsets.length);
-      return { dh:offsets[i % offsets.length], dl:shifts[round % shifts.length], ds:round ? -10 : 0 };
+      return { dh:offsets[i % offsets.length], dl:v.shifts[round % v.shifts.length], ds:round ? -10 : 0 };
     });
   }
   const PLANS = {
-    monochromatic: n => Array.from({length:n}, (_, i) => ({
-      dh:0, dl:n > 1 ? -34 + 68 * i / (n - 1) : 0, ds:i % 2 ? -8 : 0
+    monochromatic: (n, v) => Array.from({length:n}, (_, i) => ({
+      dh:0, dl:n > 1 ? v.lo + (v.hi - v.lo) * i / (n - 1) : 0, ds:i % 2 ? -8 : 0
     })),
-    analogous: n => {
-      const span = Math.min(24 * (n - 1), 160);
+    analogous: (n, v) => {
+      const span = Math.min(v.step * (n - 1), 170) * v.dir;
       return Array.from({length:n}, (_, i) => ({
         dh:n > 1 ? -span / 2 + span * i / (n - 1) : 0, dl:[0, 7, -7][i % 3], ds:0
       }));
@@ -331,32 +350,41 @@
     tetradic: cycle([0, 60, 180, 240])
   };
 
-  const state = { type:'analogous', colors:[], base:null, fresh:new Set() };
+  const state = { type:'analogous', colors:[], base:null, vary:null, fresh:new Set() };
 
   function randomBase(){
-    return { h:Math.random() * 360, s:48 + Math.random() * 32, l:44 + Math.random() * 12 };
+    return { h:Math.random() * 360, s:rand(48, 80), l:rand(44, 56) };
   }
 
-  /* Base is derived from the first locked color so the harmony forms around it */
+  /* With a lock, the hue is anchored to the first locked color (so the harmony
+     still forms around it), while saturation and lightness are redrawn */
   function computeBase(plan){
     const k = state.colors.findIndex(c => c.locked);
     if(k < 0 || !plan[k]) return randomBase();
     const hsl = rgbToHsl(...state.colors[k].rgb);
-    return { h:hsl.h - plan[k].dh, s:hsl.s - plan[k].ds, l:hsl.l - plan[k].dl };
+    return {
+      h:hsl.h - plan[k].dh,
+      s:rand(38, 82),
+      l:state.type === 'monochromatic' ? rand(44, 56) : rand(40, 60)
+    };
   }
 
-  function fromPlan(p, base){ return makeColor(base.h + p.dh, base.s + p.ds, base.l + p.dl); }
+  function fromPlan(p, base, j){
+    j = j || { dh:0, ds:0, dl:0 };
+    return makeColor(base.h + p.dh + j.dh, base.s + p.ds + j.ds, base.l + p.dl + j.dl);
+  }
 
   function generate(){
     const n = state.colors.length;
-    const plan = PLANS[state.type](n);
+    state.vary = newVariation();
+    const plan = PLANS[state.type](n, state.vary);
     const base = computeBase(plan);
     state.base = base;
     state.fresh = new Set();
     state.colors = state.colors.map((c, i) => {
       if(c.locked) return c;
       state.fresh.add(i);
-      return fromPlan(plan[i], base);
+      return fromPlan(plan[i], base, jitter());
     });
     render();
   }
@@ -439,9 +467,9 @@
 
   $('btnAdd').addEventListener('click', () => {
     const n = state.colors.length; if(n >= MAX) return;
-    const plan = PLANS[state.type](n + 1);
+    const plan = PLANS[state.type](n + 1, state.vary || newVariation());
     const base = state.base || computeBase(plan);
-    state.colors.push(fromPlan(plan[n], base));
+    state.colors.push(fromPlan(plan[n], base, jitter()));
     state.fresh = new Set([n]);
     render(); say('Added ' + state.colors[n].hex);
   });
@@ -465,6 +493,73 @@
     const ok = await copyText(css);
     say(ok ? 'Copied ' + state.colors.length + ' colors as CSS variables.' : 'Copy failed. Try again or copy each HEX.');
   });
+
+  /* ---------- PNG export ---------- */
+  async function downloadPng(){
+    try { await document.fonts.ready; } catch(_){}
+    const colors = state.colors, n = colors.length;
+    const S = 2;                                   /* 2x for sharp output */
+    const pad = 56, gap = 12, colW = 200, chipH = 260, plateH = 86, titleH = 54;
+    const W = pad * 2 + n * colW + (n - 1) * gap;
+    const H = pad + titleH + chipH + plateH + pad;
+
+    const cv = document.createElement('canvas');
+    cv.width = W * S; cv.height = H * S;
+    const ctx = cv.getContext('2d');
+    ctx.scale(S, S);
+
+    /* background + double frame + corner diamonds */
+    ctx.fillStyle = '#0d0f14'; ctx.fillRect(0, 0, W, H);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(231,234,240,.6)'; ctx.strokeRect(16.5, 16.5, W - 33, H - 33);
+    ctx.strokeStyle = 'rgba(92,127,158,.35)'; ctx.strokeRect(21.5, 21.5, W - 43, H - 43);
+    [[16.5,16.5],[W-16.5,16.5],[16.5,H-16.5],[W-16.5,H-16.5]].forEach(([x, y]) => {
+      ctx.save(); ctx.translate(x, y); ctx.rotate(Math.PI / 4);
+      ctx.fillStyle = '#0d0f14'; ctx.fillRect(-7, -7, 14, 14);
+      ctx.fillStyle = '#3f6fa8'; ctx.fillRect(-5, -5, 10, 10);
+      ctx.restore();
+    });
+
+    /* title row */
+    const typeName = $('harmony').selectedOptions[0].textContent;
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = '#e7eaf0';
+    ctx.font = '800 22px "Playfair Display", Georgia, serif';
+    ctx.fillText(typeName + ' palette', pad, pad + 24);
+    const tw = ctx.measureText(typeName + ' palette').width;
+    ctx.fillStyle = '#5c7f9e';
+    ctx.font = '500 12px "Space Grotesk", system-ui, sans-serif';
+    ctx.fillText(n + ' colors', pad + tw + 16, pad + 24);
+
+    /* swatches */
+    const top = pad + titleH;
+    colors.forEach((c, i) => {
+      const x = pad + i * (colW + gap);
+      ctx.fillStyle = '#14171f'; ctx.fillRect(x, top, colW, chipH + plateH);
+      ctx.strokeStyle = '#252a35'; ctx.strokeRect(x + .5, top + .5, colW - 1, chipH + plateH - 1);
+      ctx.strokeStyle = '#232732'; ctx.strokeRect(x + 3.5, top + 3.5, colW - 7, chipH + plateH - 7);
+      ctx.fillStyle = c.hex; ctx.fillRect(x + 6, top + 6, colW - 12, chipH - 6);
+
+      ctx.fillStyle = '#e7eaf0';
+      ctx.font = '500 19px "IBM Plex Mono", ui-monospace, Menlo, monospace';
+      ctx.fillText(c.hex, x + 14, top + chipH + 36);
+      ctx.fillStyle = '#727c8c';
+      ctx.font = '400 12.5px "IBM Plex Mono", ui-monospace, Menlo, monospace';
+      ctx.fillText('rgb(' + c.rgb.join(', ') + ')', x + 14, top + chipH + 62);
+    });
+
+    const name = 'palette-' + state.type + '-' + colors.map(c => c.hex.slice(1)).join('-').toLowerCase() + '.png';
+    cv.toBlob(blob => {
+      if(!blob){ say('Could not create the PNG. Try again.'); return; }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      say('Downloaded ' + name);
+    }, 'image/png');
+  }
+  $('btnPng').addEventListener('click', downloadPng);
 
   document.addEventListener('keydown', e => {
     if(e.code !== 'Space' || e.repeat) return;
