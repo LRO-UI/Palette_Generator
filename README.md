@@ -1,4 +1,4 @@
-# Project Name
+# Palette Generator
 
 A simple palette generator. With the options for style, harmony and download.
 
